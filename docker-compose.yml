@@ -1,0 +1,85 @@
+services:
+  ctfd:
+    image: ctfd/ctfd:3.8.9
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${CTFD_SECRET_KEY}
+      DATABASE_URL: mysql+pymysql://ctfd:${CTFD_DB_PASSWORD}@db/ctfd
+      REDIS_URL: redis://cache:6379/0
+      UPLOAD_FOLDER: /var/uploads
+      LOG_FOLDER: /var/log/CTFd
+      WORKERS: "1"
+      ACCESS_LOG: "-"
+      ERROR_LOG: "-"
+      REVERSE_PROXY: "true"
+    volumes:
+      - uploads:/var/uploads
+      - logs:/var/log/CTFd
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    networks:
+      - primary
+      - internal
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: primary
+      traefik.http.routers.ctfd-fresh.rule: "Host(`ctf.nush.app`)"
+      traefik.http.routers.ctfd-fresh.entrypoints: https
+      traefik.http.routers.ctfd-fresh.tls: "true"
+      traefik.http.routers.ctfd-fresh.tls.certresolver: tlsresolver
+      traefik.http.routers.ctfd-fresh.service: ctfd-fresh
+      traefik.http.services.ctfd-fresh.loadbalancer.server.port: "8000"
+      com.centurylinklabs.watchtower.enable: "false"
+
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${CTFD_DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ctfd
+      MARIADB_USER: ctfd
+      MARIADB_PASSWORD: ${CTFD_DB_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - internal
+    labels:
+      traefik.enable: "false"
+      com.centurylinklabs.watchtower.enable: "false"
+
+  cache:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    labels:
+      traefik.enable: "false"
+      com.centurylinklabs.watchtower.enable: "false"
+
+volumes:
+  database:
+  uploads:
+  logs:
+
+networks:
+  primary:
+    external: true
+  internal:
+    internal: true
